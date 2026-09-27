@@ -5,14 +5,14 @@ architecture**, with each tier on its **own EC2 instance**:
 
 | Tier | What | Tech | Port | Runs as |
 |------|------|------|------|---------|
-| 1. Frontend (presentation) | Web UI | Node.js static server (no npm deps) + HTML/JS | 3000 | systemd service `shoplite-frontend` |
+| 1. Frontend (presentation) | Web UI | React (Vite), built to static files | 80 | **Nginx** (`nginx` service) |
 | 2. Backend (application) | REST API | Node.js + Express + mysql2 | 5000 | systemd service `shoplite-backend` |
 | 3. Database (data) | Stores products | MySQL 8 | 3306 | `mysql` service (installed by apt) |
 
 ![ShopLite screenshot](docs/screenshot.png)
 
 The top of the page is a live **status board** showing each tier: which host
-served the frontend, which backend answered, and whether that backend can reach
+the page was loaded from, which backend answered, and whether that backend can reach
 MySQL. Stop a service or break a security-group rule and viewers see the tier
 turn **DOWN**.
 
@@ -28,22 +28,28 @@ turn **DOWN**.
      ▼                              ▼
 ┌──────────────┐            ┌──────────────┐   (3) SQL over     ┌──────────────┐
 │  FRONTEND    │            │   BACKEND    │   PRIVATE IP       │   DATABASE   │
-│  EC2 :3000   │            │   EC2 :5000  │ ─────────────────► │   EC2 :3306  │
+│  EC2 :80     │            │   EC2 :5000  │ ─────────────────► │   EC2 :3306  │
 │  public IP   │            │  public IP   │                    │  no public   │
 └──────────────┘            └──────────────┘                    │  access      │
                                                                 └──────────────┘
 ```
 
-1. The browser downloads the HTML/JS from the **frontend** (`http://FRONTEND_PUBLIC_IP:3000`).
+1. The browser downloads the built React app (HTML/JS/CSS) from **Nginx** on the
+   frontend server (`http://FRONTEND_PUBLIC_IP`).
 2. The JavaScript **in the browser** calls the **backend** on its **public IP**
    (`http://BACKEND_PUBLIC_IP:5000`). That's why the backend has to be reachable
    from the internet, and why it sends CORS headers.
 3. The backend connects to MySQL using the database's **private IP**. The database
    is never exposed to the internet.
 
-The frontend learns the backend URL from its `.env` file (`API_URL`). It serves
-that value to the browser at `/config.js`, so changing the backend IP only needs
-an `.env` edit and a service restart, with no code change.
+### Build time vs run time (worth explaining on camera)
+
+- **Backend:** `.env` is read **every time the service starts**. Change it, then
+  `systemctl restart shoplite-backend`. No rebuild.
+- **Frontend:** `VITE_API_URL` in `frontend/.env` is **baked into the JavaScript
+  when you run `npm run build`**. Nginx only serves the finished files and knows
+  nothing about `.env`. If the backend IP changes, you must **rebuild and copy
+  `dist/` again**.
 
 ---
 
@@ -59,12 +65,17 @@ shoplite/
 │   ├── package.json
 │   ├── .env.example                # DB_HOST, DB_USER, DB_PASSWORD...
 │   └── shoplite-backend.service    # systemd unit
-└── frontend/
-    ├── server.js                   # tiny static server + /config.js
+└── frontend/                       # React app (Vite)
+    ├── index.html
+    ├── src/
+    │   ├── main.jsx                # React entry point
+    │   ├── App.jsx                 # status board, add form, product table
+    │   ├── api.js                  # fetch() calls to the backend
+    │   └── style.css
     ├── package.json
-    ├── .env.example                # API_URL=http://BACKEND_PUBLIC_IP:5000
-    ├── shoplite-frontend.service   # systemd unit
-    └── public/                     # index.html, app.js, style.css
+    ├── vite.config.js
+    ├── .env.example                # VITE_API_URL=http://BACKEND_PUBLIC_IP:5000
+    └── nginx/shoplite.conf         # Nginx site config
 ```
 
 ### API endpoints
@@ -92,7 +103,7 @@ security group** (not an IP) is a good concept to teach.
 | Security group | Inbound rule | Source |
 |----------------|--------------|--------|
 | `sg-frontend` | SSH 22 | My IP |
-|  | Custom TCP **3000** | `0.0.0.0/0` |
+|  | HTTP **80** | `0.0.0.0/0` |
 | `sg-backend` | SSH 22 | My IP |
 |  | Custom TCP **5000** | `0.0.0.0/0` (browsers call it directly) |
 | `sg-db` | SSH 22 | My IP |
@@ -104,8 +115,9 @@ Write down these IPs; you'll need them below:
 - `BACKEND_PUBLIC_IP`: public IPv4 of `shoplite-backend`
 - `FRONTEND_PUBLIC_IP`: public IPv4 of `shoplite-frontend`
 
-> Public IPs change when you **stop/start** an instance. If that happens, update
-> the frontend's `API_URL` and restart it, or attach Elastic IPs.
+> Public IPs change when you **stop/start** an instance. If the backend's IP
+> changes, update `VITE_API_URL` and rebuild the frontend, or attach an Elastic IP
+> to the backend.
 
 Get the code onto each server with `git clone` (below) or `scp`.
 
@@ -207,24 +219,56 @@ http://BACKEND_PUBLIC_IP:5000/api/products
 ssh -i key.pem ubuntu@FRONTEND_PUBLIC_IP
 
 sudo apt update
-sudo apt install -y nodejs git
+sudo apt install -y nodejs npm git nginx
+sudo systemctl enable --now nginx     # visit http://FRONTEND_PUBLIC_IP: Nginx welcome page
 
 git clone https://github.com/awsdevop183/shoplite.git
-sudo cp -r shoplite/frontend /opt/shoplite-frontend
-sudo chown -R ubuntu:ubuntu /opt/shoplite-frontend
-cd /opt/shoplite-frontend
-
-# No npm install needed. The frontend has zero dependencies.
-cp .env.example .env
-nano .env          # API_URL=http://BACKEND_PUBLIC_IP:5000
-
-sudo cp shoplite-frontend.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now shoplite-frontend
-sudo systemctl status shoplite-frontend
+cd shoplite/frontend
 ```
 
-Open the app: **`http://FRONTEND_PUBLIC_IP:3000`**
+**1. Point the app at the backend, then build it:**
+
+```bash
+cp .env.example .env
+nano .env                  # VITE_API_URL=http://BACKEND_PUBLIC_IP:5000
+
+npm install
+npm run build              # creates dist/ with index.html + assets/*.js, *.css
+ls dist dist/assets
+```
+
+**2. Copy the build to Nginx's web folder:**
+
+```bash
+sudo mkdir -p /var/www/shoplite
+sudo cp -r dist/* /var/www/shoplite/
+```
+
+**3. Configure Nginx to serve it:**
+
+```bash
+sudo cp nginx/shoplite.conf /etc/nginx/sites-available/shoplite
+sudo ln -s /etc/nginx/sites-available/shoplite /etc/nginx/sites-enabled/
+sudo rm /etc/nginx/sites-enabled/default      # remove the welcome page site
+
+sudo nginx -t                                 # always test the config first
+sudo systemctl reload nginx
+```
+
+Nginx is already a systemd service (installed and enabled by apt), so the
+frontend needs no service file of its own. It starts on boot automatically.
+
+**Redeploying after a code or `.env` change:**
+
+```bash
+cd ~/shoplite && git pull
+cd frontend && npm run build
+sudo rm -rf /var/www/shoplite/* && sudo cp -r dist/* /var/www/shoplite/
+```
+
+No Nginx restart is needed for new files. Just refresh the browser.
+
+Open the app: **`http://FRONTEND_PUBLIC_IP`**
 
 All three status cards should say **UP**. Add and delete a product, then show
 the row in MySQL on the DB server:
@@ -241,13 +285,16 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 |-----------|---------|------------------|
 | Services auto-restart | `sudo kill -9 $(pgrep -f "node server.js")` on backend | Comes back in ~5s (`Restart=always`) |
 | Services survive reboot | `sudo reboot` the backend | App works again after boot (`enable`) |
+| Frontend down | `sudo systemctl stop nginx` | Page doesn't load at all (connection refused) |
 | Backend down | `sudo systemctl stop shoplite-backend` | Backend and DB cards turn **DOWN** |
 | DB down | `sudo systemctl stop mysql` on DB server | Backend **UP**, Database **DOWN** (`ECONNREFUSED`) |
 | Security groups matter | Remove the 3306 rule from `sg-db` | Database **DOWN**, error `ETIMEDOUT` |
 | Security groups matter | Remove the 5000 rule from `sg-backend` | Browser can't reach the API, so Backend **DOWN** |
 | DB is private | From your laptop: `mysql -h DB_PUBLIC_IP ...` | Times out, since only `sg-backend` is allowed |
-| Wrong config | Put a wrong IP in frontend `.env`, restart | Backend shows **DOWN** in the UI |
+| Build-time config | Put a wrong IP in frontend `.env`, rebuild, copy `dist/` | Backend shows **DOWN** in the UI |
+| Built files are static | `ls /var/www/shoplite/assets`, then `grep -o 'http://[0-9.]*:5000' /var/www/shoplite/assets/*.js` | The backend IP is inside the built JS |
 | Logs | `journalctl -u shoplite-backend -f` while clicking | Every API request is logged |
+| Nginx logs | `sudo tail -f /var/log/nginx/shoplite.access.log` | Every page and asset request |
 
 ---
 
@@ -255,19 +302,24 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 
 | Symptom | Check |
 |---------|-------|
-| Page doesn't load at all | `systemctl status shoplite-frontend`; port 3000 open in `sg-frontend`? Using `http://`, not `https://`? |
-| Backend card **DOWN** | `API_URL` in frontend `.env` correct? Restarted the frontend after editing? Port 5000 open in `sg-backend`? |
+| Page doesn't load at all | `systemctl status nginx`; port 80 open in `sg-frontend`? Using `http://`, not `https://`? |
+| Nginx welcome page shows | `default` site still enabled. Remove `/etc/nginx/sites-enabled/default`, then reload |
+| `403 Forbidden` or blank page | `dist/` not copied: `ls /var/www/shoplite` should show `index.html` and `assets/` |
+| Backend card **DOWN** | `VITE_API_URL` correct? Rebuilt **and** re-copied `dist/` after editing? Port 5000 open in `sg-backend`? |
 | Database **DOWN** with `ETIMEDOUT` | `sg-db` allows 3306 from `sg-backend`? `DB_HOST` is the DB's **private** IP? |
 | Database **DOWN** with `ECONNREFUSED` | MySQL running? `bind-address = 0.0.0.0` set and MySQL restarted? |
 | `ER_ACCESS_DENIED_ERROR` | `DB_USER`/`DB_PASSWORD` in backend `.env` match `create-user.sql`? |
 | `ER_BAD_DB_ERROR` | `schema.sql` wasn't run on the DB server |
-| Service won't start | `journalctl -u <service> -n 50`. Wrong `WorkingDirectory`? `npm install` skipped? |
+| Backend service won't start | `journalctl -u shoplite-backend -n 50`. Wrong `WorkingDirectory`? `npm install` skipped? |
+| `nginx -t` fails | Read the line number it prints. Usually a missing `;` or `}` |
 | `status=217/USER` | The unit runs as `User=ubuntu`. On Amazon Linux change it to `ec2-user` |
 
 ### Using Amazon Linux 2023 instead of Ubuntu
 
-- Login user is `ec2-user`, so change `User=` in both `.service` files and the `chown` commands.
-- `sudo dnf install -y nodejs npm git` for frontend and backend.
+- Login user is `ec2-user`, so change `User=` in the backend `.service` file and the `chown` commands.
+- `sudo dnf install -y nodejs npm git` for frontend and backend, plus `nginx` on the frontend.
+- Nginx has no `sites-available` there: copy the config to `/etc/nginx/conf.d/shoplite.conf`
+  and remove the default `server { ... }` block from `/etc/nginx/nginx.conf`.
 - MySQL: `sudo dnf install -y mariadb105-server && sudo systemctl enable --now mariadb`.
   MariaDB works with this app unchanged. Its config file is `/etc/my.cnf.d/mariadb-server.cnf`.
 
@@ -283,15 +335,17 @@ sudo mysql < database/schema.sql && sudo mysql < database/create-user.sql
 cd backend && npm install
 DB_HOST=127.0.0.1 DB_PASSWORD='ChangeMe123!' node server.js
 
-# Frontend (new terminal)
-cd frontend && API_URL=http://localhost:5000 node server.js
-# open http://localhost:3000
+# Frontend (new terminal): Vite dev server with hot reload
+cd frontend && npm install
+echo "VITE_API_URL=http://localhost:5000" > .env
+npm run dev
+# open http://localhost:5173
 ```
 
 ## Going further (later lessons)
 
-- Put **Nginx** in front of the frontend on port 80.
-- Move the backend into a **private subnet** behind an **ALB**, and have the frontend proxy `/api`.
+- Add **HTTPS** with a domain name and Let's Encrypt (`certbot --nginx`).
+- Move the backend into a **private subnet** behind an **ALB**, and have Nginx proxy `/api` so the backend needs no public IP.
 - Replace the DB EC2 with **Amazon RDS**.
 - Store `DB_PASSWORD` in **SSM Parameter Store / Secrets Manager**.
 - Automate all of this with **user data**, **Ansible**, or **Terraform**.
