@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_URL, getHealth, getProducts, addProduct, updateProduct, deleteProduct } from './api.js';
+import { getHealth, getProducts, addProduct, updateProduct, deleteProduct } from './api.js';
 
 function Badge({ up }) {
   if (up === null) return <span className="badge">…</span>;
@@ -15,8 +15,7 @@ function TierStatus({ onRecheck }) {
       setHealth(await getHealth());
       setReachable(true);
     } catch {
-      // Browser could not reach the backend at all
-      // (service down, wrong IP, port blocked by security group...)
+      // Nginx could not reach the backend (502/504), or Nginx itself is down
       setHealth(null);
       setReachable(false);
     }
@@ -40,14 +39,14 @@ function TierStatus({ onRecheck }) {
         <div className="tier">
           <h2>2 · Backend</h2>
           <Badge up={reachable} />
-          <p>API: <code>{API_URL || window.location.host + '/api → Nginx proxy'}</code></p>
-          <p>Host: <code>{reachable === false ? 'unreachable' : health?.backend.hostname || '-'}</code></p>
+          <p>API: <code>/api</code> (proxied by Nginx)</p>
+          <p>Runtime: <code>{reachable === false ? 'unreachable' : reachable ? 'Node.js' : '-'}</code></p>
         </div>
         <div className="arrow">→</div>
         <div className="tier">
           <h2>3 · Database</h2>
           <Badge up={reachable === false ? false : db ? db.status === 'up' : null} />
-          <p>Host: <code>{db?.host || 'unknown'}</code></p>
+          <p>Engine: <code>MySQL</code></p>
           <p>Version: <code>{db ? db.version || 'error: ' + db.error : '-'}</code></p>
         </div>
       </section>

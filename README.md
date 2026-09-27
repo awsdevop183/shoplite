@@ -11,9 +11,9 @@ architecture**, with each tier on its **own EC2 instance**:
 
 ![ShopLite screenshot](docs/screenshot.png)
 
-The top of the page is a live **status board** showing each tier: which host
-the page was loaded from, which backend answered, and whether that backend can reach
-MySQL. Stop a service or break a security-group rule and viewers see the tier
+The top of the page is a live **status board** showing whether each tier is up:
+Nginx, the Node.js API behind it, and MySQL behind that. It never shows backend
+or database IP addresses. Stop a service or break a security-group rule and viewers see the tier
 turn **DOWN**.
 
 ---
@@ -49,14 +49,13 @@ talks to the backend, over the VPC's private network.
 > if you allow port 5000 from the internet. That's handy for demoing the API with
 > a browser, curl or Postman, but the UI doesn't need it.
 
-### Build time vs run time (worth explaining on camera)
+### Where each address is configured (worth explaining on camera)
 
-- **Backend:** `.env` is read **every time the app starts** (`server.js` loads it with `dotenv`). Change it, then
-  `systemctl restart shoplite-backend`. No rebuild.
-- **Frontend (React):** anything in `frontend/.env` (`VITE_API_URL`) is **baked
-  into the JavaScript when you run `npm run build`**. That's why the default leaves it
-  empty and uses the Nginx proxy instead.
-- **Nginx:** the backend's private IP lives in the Nginx config. If it changes,
+- **Backend:** `DB_HOST` lives in `backend/.env`, read **every time the app starts**
+  (`server.js` loads it with `dotenv`). Change it, then `systemctl restart shoplite-backend`.
+- **Frontend (React):** contains **no addresses at all**. It always calls `/api` on
+  the server it was loaded from, so the same build works on any server.
+- **Nginx:** the backend's private IP lives only in the Nginx config. If it changes,
   edit the config and `sudo systemctl reload nginx`. No rebuild.
 
 ---
@@ -82,7 +81,6 @@ shoplite/
     │   └── style.css
     ├── package.json
     ├── vite.config.js
-    ├── .env.example                # VITE_API_URL (empty = use the Nginx /api proxy)
     └── nginx/shoplite.conf         # Nginx site config + /api reverse proxy
 ```
 
@@ -90,7 +88,7 @@ shoplite/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/health` | Backend hostname and DB status/version |
+| GET | `/api/health` | Backend hostname and DB host/status/version (the UI doesn't display the hostname or IPs) |
 | GET | `/api/products` | List products |
 | POST | `/api/products` | Add product: `{"name":"Mouse","price":19.99,"stock":10}` |
 | PUT | `/api/products/:id` | Update a product. Send all fields: `{"name":"Mouse","price":17.99,"stock":8}` |
@@ -250,7 +248,6 @@ cd shoplite/frontend
 **1. Build the React app:**
 
 ```bash
-cp .env.example .env       # leave VITE_API_URL empty: the app will call /api on Nginx
 npm install
 npm run build              # creates dist/ with index.html + assets/*.js, *.css
 ls dist dist/assets
@@ -317,7 +314,7 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | Security groups matter | Remove the 3306 rule from `sg-db` | Database **DOWN**, error `ETIMEDOUT` |
 | Security groups matter | Remove the 5000-from-`sg-frontend` rule in `sg-backend` | Nginx can't reach the backend: Backend **DOWN**, `HTTP 504` after the timeout |
 | Reverse proxy | Browser DevTools → Network while using the app | All calls go to `FRONTEND_PUBLIC_IP/api/...`, never to port 5000 |
-| Private IPs vs browser | Build with `VITE_API_URL=http://BACKEND_PRIVATE_IP:5000` | `curl` on EC2 works but the UI fails: the browser can't reach private IPs |
+| Private IPs vs browser | From your laptop: `curl http://BACKEND_PRIVATE_IP:5000/api/health` | Fails, while the same command on the frontend EC2 works. Only servers in the VPC can reach private IPs |
 | DB is private | From your laptop: `mysql -h DB_PUBLIC_IP ...` | Times out, since only `sg-backend` is allowed |
 | Logs | `journalctl -u shoplite-backend -f` while clicking | Every API request is logged |
 | Nginx logs | `sudo tail -f /var/log/nginx/shoplite.access.log` | Every page, asset and `/api` request |
@@ -333,11 +330,11 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | `403 Forbidden` or blank page | `dist/` not copied: `ls /var/www/shoplite` should show `index.html` and `assets/` |
 | Backend card **DOWN**, `HTTP 502` | Nginx reached the backend's IP but nothing listens on 5000: `systemctl status shoplite-backend` |
 | Backend card **DOWN**, `HTTP 504` or long wait | Nginx can't reach the backend: `sg-backend` allows 5000 from `sg-frontend`? Right private IP in `proxy_pass`? Test with `curl http://BACKEND_PRIVATE_IP:5000/api/health` **on the frontend EC2** |
-| Backend card **DOWN**, `Failed to fetch` | The built JS calls a URL the browser can't reach. `frontend/.env` must have `VITE_API_URL=` **empty** (or the backend's **public** IP, never `172.31.x.x`). Rebuild and re-copy `dist/` |
+| Page shows a backend IP, or cards stuck on `…` | An old build is still deployed. Rebuild (`npm run build`) and re-copy `dist/` to `/var/www/shoplite`, then hard-refresh (Ctrl+Shift+R) |
 | `nginx -t`: host not found in upstream | You didn't replace `BACKEND_PRIVATE_IP` in the config |
 | Database **DOWN** with `ETIMEDOUT` | `sg-db` allows 3306 from `sg-backend`? `DB_HOST` is the DB's **private** IP? |
 | Database **DOWN** with `ECONNREFUSED` | MySQL running? `bind-address = 0.0.0.0` set and MySQL restarted? |
-| Database card shows host `localhost` | The backend didn't get `DB_HOST`. Is `.env` in `/opt/shoplite-backend/` (next to `server.js`)? Line must be exactly `DB_HOST=172.31.x.x` (no spaces, quotes or `export`). Pulled the latest code and ran `npm install`? Then `sudo systemctl restart shoplite-backend` and check `journalctl -u shoplite-backend -n 5` for the `Database:` line |
+| Database **DOWN** and backend log says `Database: localhost:3306` | The backend didn't get `DB_HOST`. Is `.env` in `/opt/shoplite-backend/` (next to `server.js`)? Line must be exactly `DB_HOST=172.31.x.x` (no spaces, quotes or `export`). Pulled the latest code and ran `npm install`? Then `sudo systemctl restart shoplite-backend` and check `journalctl -u shoplite-backend -n 5` for the `Database:` line |
 | `ER_ACCESS_DENIED_ERROR` | `DB_USER`/`DB_PASSWORD` in backend `.env` match `create-user.sql`? |
 | `ER_BAD_DB_ERROR` | `schema.sql` wasn't run on the DB server |
 | Backend service won't start | `journalctl -u shoplite-backend -n 50`. Wrong `WorkingDirectory`? `npm install` skipped? |
