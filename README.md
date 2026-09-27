@@ -11,10 +11,11 @@ architecture**, with each tier on its **own EC2 instance**:
 
 ![ShopLite screenshot](docs/screenshot.png)
 
-The top of the page is a live **status board** showing whether each tier is up:
-Nginx, the Node.js API behind it, and MySQL behind that. It never shows backend
-or database IP addresses. Stop a service or break a security-group rule and viewers see the tier
-turn **DOWN**.
+The UI is a small inventory dashboard: summary stats, search and stock filter,
+a product table with stock badges, add/edit in a pop-up form, and delete with
+confirmation. If a tier breaks, the page shows a red error banner with the reason
+(for example `Database error: ECONNREFUSED` or `HTTP 502 Bad Gateway`). Check each tier
+directly with `curl http://FRONTEND_PUBLIC_IP/api/health`.
 
 ---
 
@@ -76,7 +77,7 @@ shoplite/
     ├── index.html
     ├── src/
     │   ├── main.jsx                # React entry point
-    │   ├── App.jsx                 # status board, add form, product table
+    │   ├── App.jsx                 # dashboard: stats, search, table, add/edit/delete dialogs
     │   ├── api.js                  # fetch() calls to the backend
     │   └── style.css
     ├── package.json
@@ -293,8 +294,9 @@ No Nginx restart is needed for new files. Just refresh the browser.
 
 Open the app: **`http://FRONTEND_PUBLIC_IP`**
 
-All three status cards should say **UP**. Add and delete a product, then show
-the row in MySQL on the DB server:
+Products should load, and `http://FRONTEND_PUBLIC_IP/api/health` should show
+`"status":"up"` for both backend and database. Add, edit and delete a product, then
+show the rows in MySQL on the DB server:
 
 ```bash
 sudo mysql -e "SELECT * FROM shoplite.products;"
@@ -309,10 +311,10 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | Services auto-restart | `sudo kill -9 $(pgrep -f "node server.js")` on backend | Comes back in ~5s (`Restart=always`) |
 | Services survive reboot | `sudo reboot` the backend | App works again after boot (`enable`) |
 | Frontend down | `sudo systemctl stop nginx` | Page doesn't load at all (connection refused) |
-| Backend down | `sudo systemctl stop shoplite-backend` | Backend and DB cards turn **DOWN** |
-| DB down | `sudo systemctl stop mysql` on DB server | Backend **UP**, Database **DOWN** (`ECONNREFUSED`) |
-| Security groups matter | Remove the 3306 rule from `sg-db` | Database **DOWN**, error `ETIMEDOUT` |
-| Security groups matter | Remove the 5000-from-`sg-frontend` rule in `sg-backend` | Nginx can't reach the backend: Backend **DOWN**, `HTTP 504` after the timeout |
+| Backend down | `sudo systemctl stop shoplite-backend` | Error banner: `HTTP 502 Bad Gateway` |
+| DB down | `sudo systemctl stop mysql` on DB server | Error banner: `Database error: ECONNREFUSED` |
+| Security groups matter | Remove the 3306 rule from `sg-db` | Error banner: `Database error: ETIMEDOUT` (after ~5s) |
+| Security groups matter | Remove the 5000-from-`sg-frontend` rule in `sg-backend` | Nginx can't reach the backend: error banner `HTTP 504 Gateway Time-out` |
 | Reverse proxy | Browser DevTools → Network while using the app | All calls go to `FRONTEND_PUBLIC_IP/api/...`, never to port 5000 |
 | Private IPs vs browser | From your laptop: `curl http://BACKEND_PRIVATE_IP:5000/api/health` | Fails, while the same command on the frontend EC2 works. Only servers in the VPC can reach private IPs |
 | DB is private | From your laptop: `mysql -h DB_PUBLIC_IP ...` | Times out, since only `sg-backend` is allowed |
@@ -328,14 +330,14 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | Page doesn't load at all | `systemctl status nginx`; port 80 open in `sg-frontend`? Using `http://`, not `https://`? |
 | Nginx welcome page shows | `default` site still enabled. Remove `/etc/nginx/sites-enabled/default`, then reload |
 | `403 Forbidden` or blank page | `dist/` not copied: `ls /var/www/shoplite` should show `index.html` and `assets/` |
-| Backend card **DOWN**, `HTTP 502` | Nginx reached the backend's IP but nothing listens on 5000: `systemctl status shoplite-backend` |
-| Backend card **DOWN**, `HTTP 504` or long wait | Nginx can't reach the backend: `sg-backend` allows 5000 from `sg-frontend`? Right private IP in `proxy_pass`? Test with `curl http://BACKEND_PRIVATE_IP:5000/api/health` **on the frontend EC2** |
-| Page shows a backend IP, or cards stuck on `…` | An old build is still deployed. Rebuild (`npm run build`) and re-copy `dist/` to `/var/www/shoplite`, then hard-refresh (Ctrl+Shift+R) |
-| Backend card **DOWN**, products `HTTP 404`, and `curl -i localhost/api/health` says `Cannot GET /health` | `proxy_pass` has a trailing slash or path. It must be exactly `proxy_pass http://BACKEND_PRIVATE_IP:5000;` with nothing after the port |
+| Banner says `HTTP 502` | Nginx reached the backend's IP but nothing listens on 5000: `systemctl status shoplite-backend` |
+| Banner says `HTTP 504`, or a long wait | Nginx can't reach the backend: `sg-backend` allows 5000 from `sg-frontend`? Right private IP in `proxy_pass`? Test with `curl http://BACKEND_PRIVATE_IP:5000/api/health` **on the frontend EC2** |
+| Page still looks like an older version | An old build is still deployed. Rebuild (`npm run build`) and re-copy `dist/` to `/var/www/shoplite`, then hard-refresh (Ctrl+Shift+R) |
+| Banner says `HTTP 404`, and `curl -i localhost/api/health` says `Cannot GET /health` | `proxy_pass` has a trailing slash or path. It must be exactly `proxy_pass http://BACKEND_PRIVATE_IP:5000;` with nothing after the port |
 | `nginx -t`: host not found in upstream | You didn't replace `BACKEND_PRIVATE_IP` in the config |
-| Database **DOWN** with `ETIMEDOUT` | `sg-db` allows 3306 from `sg-backend`? `DB_HOST` is the DB's **private** IP? |
-| Database **DOWN** with `ECONNREFUSED` | MySQL running? `bind-address = 0.0.0.0` set and MySQL restarted? |
-| Database **DOWN** and backend log says `Database: localhost:3306` | The backend didn't get `DB_HOST`. Is `.env` in `/opt/shoplite-backend/` (next to `server.js`)? Line must be exactly `DB_HOST=172.31.x.x` (no spaces, quotes or `export`). Pulled the latest code and ran `npm install`? Then `sudo systemctl restart shoplite-backend` and check `journalctl -u shoplite-backend -n 5` for the `Database:` line |
+| Banner says `Database error: ETIMEDOUT` | `sg-db` allows 3306 from `sg-backend`? `DB_HOST` is the DB's **private** IP? |
+| Banner says `Database error: ECONNREFUSED` | MySQL running? `bind-address = 0.0.0.0` set and MySQL restarted? |
+| Database errors and backend log says `Database: localhost:3306` | The backend didn't get `DB_HOST`. Is `.env` in `/opt/shoplite-backend/` (next to `server.js`)? Line must be exactly `DB_HOST=172.31.x.x` (no spaces, quotes or `export`). Pulled the latest code and ran `npm install`? Then `sudo systemctl restart shoplite-backend` and check `journalctl -u shoplite-backend -n 5` for the `Database:` line |
 | `ER_ACCESS_DENIED_ERROR` | `DB_USER`/`DB_PASSWORD` in backend `.env` match `create-user.sql`? |
 | `ER_BAD_DB_ERROR` | `schema.sql` wasn't run on the DB server |
 | Backend service won't start | `journalctl -u shoplite-backend -n 50`. Wrong `WorkingDirectory`? `npm install` skipped? |

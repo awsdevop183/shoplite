@@ -10,13 +10,6 @@ async function request(path, options) {
   return data;
 }
 
-export const getHealth = async () => {
-  // /api/health answers 503 when the DB is down but still sends useful JSON.
-  // Anything that isn't JSON (e.g. Nginx 502) means the backend is unreachable.
-  const res = await fetch('/api/health');
-  return res.json();
-};
-
 export const getProducts = () => request('/api/products');
 
 export const addProduct = (product) =>
