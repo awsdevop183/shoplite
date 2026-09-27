@@ -331,6 +331,7 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | Backend card **DOWN**, `HTTP 502` | Nginx reached the backend's IP but nothing listens on 5000: `systemctl status shoplite-backend` |
 | Backend card **DOWN**, `HTTP 504` or long wait | Nginx can't reach the backend: `sg-backend` allows 5000 from `sg-frontend`? Right private IP in `proxy_pass`? Test with `curl http://BACKEND_PRIVATE_IP:5000/api/health` **on the frontend EC2** |
 | Page shows a backend IP, or cards stuck on `…` | An old build is still deployed. Rebuild (`npm run build`) and re-copy `dist/` to `/var/www/shoplite`, then hard-refresh (Ctrl+Shift+R) |
+| Backend card **DOWN**, products `HTTP 404`, and `curl -i localhost/api/health` says `Cannot GET /health` | `proxy_pass` has a trailing slash or path. It must be exactly `proxy_pass http://BACKEND_PRIVATE_IP:5000;` with nothing after the port |
 | `nginx -t`: host not found in upstream | You didn't replace `BACKEND_PRIVATE_IP` in the config |
 | Database **DOWN** with `ETIMEDOUT` | `sg-db` allows 3306 from `sg-backend`? `DB_HOST` is the DB's **private** IP? |
 | Database **DOWN** with `ECONNREFUSED` | MySQL running? `bind-address = 0.0.0.0` set and MySQL restarted? |
