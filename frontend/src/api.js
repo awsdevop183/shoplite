@@ -24,4 +24,11 @@ export const addProduct = (product) =>
     body: JSON.stringify(product),
   });
 
-export const deleteProduct = (id) => request(`/api/products/${id}`, { method: 'DELETE' });
+export const updateProduct = (id, product) =>
+  request(`/api/products/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(product),
+  });
+
+export const deleteProduct =(id) => request(`/api/products/${id}`, { method: 'DELETE' });

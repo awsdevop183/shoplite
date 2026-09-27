@@ -76,7 +76,7 @@ button {
   font-size: 0.95rem;
   cursor: pointer;
 }
-button.secondary { margin-top: 12px; background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+button.secondary { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
 button.danger { background: var(--down); padding: 4px 10px; font-size: 0.8rem; }
 
 table { width: 100%; border-collapse: collapse; }
@@ -84,3 +84,7 @@ th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border);
 th { color: var(--muted); font-size: 0.85rem; }
 .message { color: var(--muted); font-size: 0.9rem; }
 .message.error { color: var(--down); }
+main > button.secondary { margin-top: 12px; }
+.actions { white-space: nowrap; }
+.actions button { padding: 4px 10px; font-size: 0.8rem; margin-right: 4px; }
+td input { width: 100%; min-width: 60px; padding: 4px 6px; font-size: 0.95rem; }

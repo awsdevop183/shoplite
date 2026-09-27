@@ -85,7 +85,19 @@ shoplite/
 | GET | `/api/health` | Backend hostname and DB status/version |
 | GET | `/api/products` | List products |
 | POST | `/api/products` | Add product: `{"name":"Mouse","price":19.99,"stock":10}` |
+| PUT | `/api/products/:id` | Update a product. Send all fields: `{"name":"Mouse","price":17.99,"stock":8}` |
 | DELETE | `/api/products/:id` | Delete a product |
+
+Try them with `curl` (replace the IP):
+
+```bash
+API=http://BACKEND_PUBLIC_IP:5000
+curl $API/api/health
+curl $API/api/products
+curl -X POST   $API/api/products   -H 'Content-Type: application/json' -d '{"name":"Webcam","price":39.5,"stock":5}'
+curl -X PUT    $API/api/products/1 -H 'Content-Type: application/json' -d '{"name":"Wireless Mouse","price":17.99,"stock":45}'
+curl -X DELETE $API/api/products/1
+```
 
 ---
 

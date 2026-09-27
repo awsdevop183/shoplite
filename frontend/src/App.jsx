@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_URL, getHealth, getProducts, addProduct, deleteProduct } from './api.js';
+import { API_URL, getHealth, getProducts, addProduct, updateProduct, deleteProduct } from './api.js';
 
 function Badge({ up }) {
   if (up === null) return <span className="badge">…</span>;
@@ -111,6 +111,22 @@ export default function App() {
     load();
   };
 
+  // The row being edited: { id, name, price, stock }, or null
+  const [editing, setEditing] = useState(null);
+
+  const updateEditing = (e) => setEditing({ ...editing, [e.target.name]: e.target.value });
+
+  const save = async () => {
+    try {
+      await updateProduct(editing.id, { name: editing.name, price: editing.price, stock: editing.stock || 0 });
+    } catch (err) {
+      setMessage({ text: 'Could not update product: ' + err.message, error: true });
+      return;
+    }
+    setEditing(null);
+    load();
+  };
+
   useEffect(() => {
     load();
   }, []);
@@ -132,15 +148,31 @@ export default function App() {
               <tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th></th></tr>
             </thead>
             <tbody>
-              {products.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.id}</td>
-                  <td>{p.name}</td>
-                  <td>${Number(p.price).toFixed(2)}</td>
-                  <td>{p.stock}</td>
-                  <td><button className="danger" onClick={() => remove(p.id)}>Delete</button></td>
-                </tr>
-              ))}
+              {products.map((p) =>
+                editing?.id === p.id ? (
+                  <tr key={p.id}>
+                    <td>{p.id}</td>
+                    <td><input name="name" required maxLength={100} value={editing.name} onChange={updateEditing} /></td>
+                    <td><input name="price" type="number" step="0.01" min="0" value={editing.price} onChange={updateEditing} /></td>
+                    <td><input name="stock" type="number" min="0" value={editing.stock} onChange={updateEditing} /></td>
+                    <td className="actions">
+                      <button onClick={save}>Save</button>
+                      <button className="secondary" onClick={() => setEditing(null)}>Cancel</button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={p.id}>
+                    <td>{p.id}</td>
+                    <td>{p.name}</td>
+                    <td>${Number(p.price).toFixed(2)}</td>
+                    <td>{p.stock}</td>
+                    <td className="actions">
+                      <button className="secondary" onClick={() => setEditing({ ...p })}>Edit</button>
+                      <button className="danger" onClick={() => remove(p.id)}>Delete</button>
+                    </td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
         </section>

@@ -76,6 +76,25 @@ app.post('/api/products', async (req, res) => {
   }
 });
 
+// PUT replaces the whole product: send name, price and stock
+app.put('/api/products/:id', async (req, res) => {
+  const { name, price, stock } = req.body || {};
+  if (!name || price === undefined || isNaN(Number(price))) {
+    return res.status(400).json({ error: 'name and a numeric price are required' });
+  }
+  try {
+    const [result] = await db.query(
+      'UPDATE products SET name = ?, price = ?, stock = ? WHERE id = ?',
+      [String(name).slice(0, 100), Number(price), Number(stock) || 0, req.params.id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ id: Number(req.params.id), name, price: Number(price), stock: Number(stock) || 0 });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error: ' + (err.code || err.message) });
+  }
+});
+
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const [result] = await db.query('DELETE FROM products WHERE id = ?', [req.params.id]);
