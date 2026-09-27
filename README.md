@@ -44,7 +44,7 @@ turn **DOWN**.
 
 ### Build time vs run time (worth explaining on camera)
 
-- **Backend:** `.env` is read **every time the service starts**. Change it, then
+- **Backend:** `.env` is read **every time the app starts** (`server.js` loads it with `dotenv`). Change it, then
   `systemctl restart shoplite-backend`. No rebuild.
 - **Frontend:** `VITE_API_URL` in `frontend/.env` is **baked into the JavaScript
   when you run `npm run build`**. Nginx only serves the finished files and knows
@@ -200,8 +200,7 @@ nano .env          # set DB_HOST=DB_PRIVATE_IP and DB_PASSWORD
 **Run it manually first** (useful for showing what a service *replaces*):
 
 ```bash
-set -a; source .env; set +a
-node server.js
+node server.js     # reads .env from this folder (via the dotenv package)
 # in another terminal:  curl localhost:5000/api/health
 # Ctrl+C to stop
 ```
@@ -320,6 +319,7 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | Backend card **DOWN** | `VITE_API_URL` correct? Rebuilt **and** re-copied `dist/` after editing? Port 5000 open in `sg-backend`? |
 | Database **DOWN** with `ETIMEDOUT` | `sg-db` allows 3306 from `sg-backend`? `DB_HOST` is the DB's **private** IP? |
 | Database **DOWN** with `ECONNREFUSED` | MySQL running? `bind-address = 0.0.0.0` set and MySQL restarted? |
+| Database card shows host `localhost` | The backend didn't get `DB_HOST`. Is `.env` in `/opt/shoplite-backend/` (next to `server.js`)? Line must be exactly `DB_HOST=172.31.x.x` (no spaces, quotes or `export`). Pulled the latest code and ran `npm install`? Then `sudo systemctl restart shoplite-backend` and check `journalctl -u shoplite-backend -n 5` for the `Database:` line |
 | `ER_ACCESS_DENIED_ERROR` | `DB_USER`/`DB_PASSWORD` in backend `.env` match `create-user.sql`? |
 | `ER_BAD_DB_ERROR` | `schema.sql` wasn't run on the DB server |
 | Backend service won't start | `journalctl -u shoplite-backend -n 50`. Wrong `WorkingDirectory`? `npm install` skipped? |

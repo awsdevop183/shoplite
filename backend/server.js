@@ -1,6 +1,11 @@
 // ShopLite backend — tier 2 (application / API tier)
 // Talks to MySQL (tier 3) and serves JSON to the browser (tier 1).
 
+// Load settings from the .env file next to this file into process.env.
+// Works both with `node server.js` and under systemd. Variables that are
+// already set (e.g. by systemd's EnvironmentFile) are NOT overwritten.
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
