@@ -1,16 +1,19 @@
 // VITE_API_URL comes from frontend/.env and is baked in at BUILD time (npm run build).
-// The browser calls the backend directly at this address.
-export const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+// Empty (default): calls go to /api on the same server, and Nginx proxies them
+// to the backend. Otherwise the browser calls the backend directly at this URL.
+export const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 async function request(path, options) {
   const res = await fetch(API_URL + path, options);
-  const data = await res.json();
+  // Nginx returns an HTML page (not JSON) for errors like 502 Bad Gateway
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status} ${res.statusText}` }));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
 export const getHealth = async () => {
-  // /api/health answers 503 when the DB is down but still sends useful JSON
+  // /api/health answers 503 when the DB is down but still sends useful JSON.
+  // Anything that isn't JSON (e.g. Nginx 502) means the backend is unreachable.
   const res = await fetch(API_URL + '/api/health');
   return res.json();
 };

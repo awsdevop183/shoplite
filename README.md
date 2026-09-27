@@ -21,35 +21,43 @@ turn **DOWN**.
 ## How the traffic flows
 
 ```
-                 Internet
-                    │
-     ┌──────────────┴───────────────┐
-     │ (1) GET page                 │ (2) fetch() API calls from the browser
-     ▼                              ▼
-┌──────────────┐            ┌──────────────┐   (3) SQL over     ┌──────────────┐
-│  FRONTEND    │            │   BACKEND    │   PRIVATE IP       │   DATABASE   │
-│  EC2 :80     │            │   EC2 :5000  │ ─────────────────► │   EC2 :3306  │
-│  public IP   │            │  public IP   │                    │  no public   │
-└──────────────┘            └──────────────┘                    │  access      │
-                                                                └──────────────┘
+   Your browser (on the internet)
+          │
+          │ (1) http://FRONTEND_PUBLIC_IP/            → the React app
+          │ (2) http://FRONTEND_PUBLIC_IP/api/...     → API calls
+          ▼
+┌──────────────────┐ (3) /api/... over  ┌──────────────┐ (4) SQL over  ┌──────────────┐
+│  FRONTEND EC2    │     PRIVATE IP     │  BACKEND EC2 │  PRIVATE IP   │ DATABASE EC2 │
+│  Nginx :80       │ ─────────────────► │  Node :5000  │ ────────────► │ MySQL :3306  │
+│  public IP       │                    │              │               │              │
+└──────────────────┘                    └──────────────┘               └──────────────┘
 ```
 
 1. The browser downloads the built React app (HTML/JS/CSS) from **Nginx** on the
-   frontend server (`http://FRONTEND_PUBLIC_IP`).
-2. The JavaScript **in the browser** calls the **backend** on its **public IP**
-   (`http://BACKEND_PUBLIC_IP:5000`). That's why the backend has to be reachable
-   from the internet, and why it sends CORS headers.
-3. The backend connects to MySQL using the database's **private IP**. The database
-   is never exposed to the internet.
+   frontend server.
+2. The React code calls **`/api/...` on the same server** it was loaded from.
+3. Nginx **reverse-proxies** every `/api/` request to the backend's **private IP**
+   (`location /api/` in `frontend/nginx/shoplite.conf`).
+4. The backend connects to MySQL using the database's **private IP**.
+
+**Why a proxy?** The React code runs in the viewer's **browser**, outside AWS. A
+browser can't reach private IPs like `172.31.x.x`. So `curl http://172.31.x.x:5000`
+works *on an EC2*, but the same URL fails from the UI. With the proxy, only Nginx
+talks to the backend, over the VPC's private network.
+
+> The backend can **still** be opened directly at `http://BACKEND_PUBLIC_IP:5000/api/products`
+> if you allow port 5000 from the internet. That's handy for demoing the API with
+> a browser, curl or Postman, but the UI doesn't need it.
 
 ### Build time vs run time (worth explaining on camera)
 
 - **Backend:** `.env` is read **every time the app starts** (`server.js` loads it with `dotenv`). Change it, then
   `systemctl restart shoplite-backend`. No rebuild.
-- **Frontend:** `VITE_API_URL` in `frontend/.env` is **baked into the JavaScript
-  when you run `npm run build`**. Nginx only serves the finished files and knows
-  nothing about `.env`. If the backend IP changes, you must **rebuild and copy
-  `dist/` again**.
+- **Frontend (React):** anything in `frontend/.env` (`VITE_API_URL`) is **baked
+  into the JavaScript when you run `npm run build`**. That's why the default leaves it
+  empty and uses the Nginx proxy instead.
+- **Nginx:** the backend's private IP lives in the Nginx config. If it changes,
+  edit the config and `sudo systemctl reload nginx`. No rebuild.
 
 ---
 
@@ -74,8 +82,8 @@ shoplite/
     │   └── style.css
     ├── package.json
     ├── vite.config.js
-    ├── .env.example                # VITE_API_URL=http://BACKEND_PUBLIC_IP:5000
-    └── nginx/shoplite.conf         # Nginx site config
+    ├── .env.example                # VITE_API_URL (empty = use the Nginx /api proxy)
+    └── nginx/shoplite.conf         # Nginx site config + /api reverse proxy
 ```
 
 ### API endpoints
@@ -117,19 +125,20 @@ security group** (not an IP) is a good concept to teach.
 | `sg-frontend` | SSH 22 | My IP |
 |  | HTTP **80** | `0.0.0.0/0` |
 | `sg-backend` | SSH 22 | My IP |
-|  | Custom TCP **5000** | `0.0.0.0/0` (browsers call it directly) |
+|  | Custom TCP **5000** | **`sg-frontend`** (Nginx proxies `/api` to it) |
+|  | Custom TCP **5000** *(optional)* | `0.0.0.0/0`, only to demo the API from your laptop |
 | `sg-db` | SSH 22 | My IP |
 |  | MySQL/Aurora **3306** | **`sg-backend`** (only the backend can reach the DB) |
 
 Write down these IPs; you'll need them below:
 
 - `DB_PRIVATE_IP`: private IPv4 of `shoplite-db`
-- `BACKEND_PUBLIC_IP`: public IPv4 of `shoplite-backend`
+- `BACKEND_PRIVATE_IP`: private IPv4 of `shoplite-backend` (used in the Nginx config)
+- `BACKEND_PUBLIC_IP`: public IPv4 of `shoplite-backend` (only for SSH and API demos)
 - `FRONTEND_PUBLIC_IP`: public IPv4 of `shoplite-frontend`
 
-> Public IPs change when you **stop/start** an instance. If the backend's IP
-> changes, update `VITE_API_URL` and rebuild the frontend, or attach an Elastic IP
-> to the backend.
+> Public IPs change when you **stop/start** an instance; private IPs don't. The
+> app only uses private IPs between servers, so a restart doesn't break it.
 
 Get the code onto each server with `git clone` (below) or `scp`.
 
@@ -215,7 +224,8 @@ sudo systemctl status shoplite-backend
 journalctl -u shoplite-backend -f          # live logs (Ctrl+C to exit)
 ```
 
-**Test from the internet** (your laptop's browser or terminal):
+**Test from the internet** (your laptop's browser or terminal). This needs the optional
+`0.0.0.0/0` rule on port 5000 in `sg-backend`:
 
 ```
 http://BACKEND_PUBLIC_IP:5000/api/health
@@ -237,12 +247,10 @@ git clone https://github.com/awsdevop183/shoplite.git
 cd shoplite/frontend
 ```
 
-**1. Point the app at the backend, then build it:**
+**1. Build the React app:**
 
 ```bash
-cp .env.example .env
-nano .env                  # VITE_API_URL=http://BACKEND_PUBLIC_IP:5000
-
+cp .env.example .env       # leave VITE_API_URL empty: the app will call /api on Nginx
 npm install
 npm run build              # creates dist/ with index.html + assets/*.js, *.css
 ls dist dist/assets
@@ -255,21 +263,28 @@ sudo mkdir -p /var/www/shoplite
 sudo cp -r dist/* /var/www/shoplite/
 ```
 
-**3. Configure Nginx to serve it:**
+**3. Configure Nginx to serve it and proxy `/api` to the backend:**
 
 ```bash
+# Put the backend's PRIVATE IP into the config (e.g. 172.31.11.109)
+sed -i 's/BACKEND_PRIVATE_IP/172.31.11.109/' nginx/shoplite.conf
+grep proxy_pass nginx/shoplite.conf           # check: proxy_pass http://172.31.11.109:5000;
+
 sudo cp nginx/shoplite.conf /etc/nginx/sites-available/shoplite
 sudo ln -s /etc/nginx/sites-available/shoplite /etc/nginx/sites-enabled/
 sudo rm /etc/nginx/sites-enabled/default      # remove the welcome page site
 
 sudo nginx -t                                 # always test the config first
 sudo systemctl reload nginx
+
+# Test the proxy from the frontend server itself
+curl http://localhost/api/health
 ```
 
 Nginx is already a systemd service (installed and enabled by apt), so the
 frontend needs no service file of its own. It starts on boot automatically.
 
-**Redeploying after a code or `.env` change:**
+**Redeploying after a code change:**
 
 ```bash
 cd ~/shoplite && git pull
@@ -300,12 +315,12 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | Backend down | `sudo systemctl stop shoplite-backend` | Backend and DB cards turn **DOWN** |
 | DB down | `sudo systemctl stop mysql` on DB server | Backend **UP**, Database **DOWN** (`ECONNREFUSED`) |
 | Security groups matter | Remove the 3306 rule from `sg-db` | Database **DOWN**, error `ETIMEDOUT` |
-| Security groups matter | Remove the 5000 rule from `sg-backend` | Browser can't reach the API, so Backend **DOWN** |
+| Security groups matter | Remove the 5000-from-`sg-frontend` rule in `sg-backend` | Nginx can't reach the backend: Backend **DOWN**, `HTTP 504` after the timeout |
+| Reverse proxy | Browser DevTools → Network while using the app | All calls go to `FRONTEND_PUBLIC_IP/api/...`, never to port 5000 |
+| Private IPs vs browser | Build with `VITE_API_URL=http://BACKEND_PRIVATE_IP:5000` | `curl` on EC2 works but the UI fails: the browser can't reach private IPs |
 | DB is private | From your laptop: `mysql -h DB_PUBLIC_IP ...` | Times out, since only `sg-backend` is allowed |
-| Build-time config | Put a wrong IP in frontend `.env`, rebuild, copy `dist/` | Backend shows **DOWN** in the UI |
-| Built files are static | `ls /var/www/shoplite/assets`, then `grep -o 'http://[0-9.]*:5000' /var/www/shoplite/assets/*.js` | The backend IP is inside the built JS |
 | Logs | `journalctl -u shoplite-backend -f` while clicking | Every API request is logged |
-| Nginx logs | `sudo tail -f /var/log/nginx/shoplite.access.log` | Every page and asset request |
+| Nginx logs | `sudo tail -f /var/log/nginx/shoplite.access.log` | Every page, asset and `/api` request |
 
 ---
 
@@ -316,7 +331,10 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | Page doesn't load at all | `systemctl status nginx`; port 80 open in `sg-frontend`? Using `http://`, not `https://`? |
 | Nginx welcome page shows | `default` site still enabled. Remove `/etc/nginx/sites-enabled/default`, then reload |
 | `403 Forbidden` or blank page | `dist/` not copied: `ls /var/www/shoplite` should show `index.html` and `assets/` |
-| Backend card **DOWN** | `VITE_API_URL` correct? Rebuilt **and** re-copied `dist/` after editing? Port 5000 open in `sg-backend`? |
+| Backend card **DOWN**, `HTTP 502` | Nginx reached the backend's IP but nothing listens on 5000: `systemctl status shoplite-backend` |
+| Backend card **DOWN**, `HTTP 504` or long wait | Nginx can't reach the backend: `sg-backend` allows 5000 from `sg-frontend`? Right private IP in `proxy_pass`? Test with `curl http://BACKEND_PRIVATE_IP:5000/api/health` **on the frontend EC2** |
+| Backend card **DOWN**, `Failed to fetch` | The built JS calls a URL the browser can't reach. `frontend/.env` must have `VITE_API_URL=` **empty** (or the backend's **public** IP, never `172.31.x.x`). Rebuild and re-copy `dist/` |
+| `nginx -t`: host not found in upstream | You didn't replace `BACKEND_PRIVATE_IP` in the config |
 | Database **DOWN** with `ETIMEDOUT` | `sg-db` allows 3306 from `sg-backend`? `DB_HOST` is the DB's **private** IP? |
 | Database **DOWN** with `ECONNREFUSED` | MySQL running? `bind-address = 0.0.0.0` set and MySQL restarted? |
 | Database card shows host `localhost` | The backend didn't get `DB_HOST`. Is `.env` in `/opt/shoplite-backend/` (next to `server.js`)? Line must be exactly `DB_HOST=172.31.x.x` (no spaces, quotes or `export`). Pulled the latest code and ran `npm install`? Then `sudo systemctl restart shoplite-backend` and check `journalctl -u shoplite-backend -n 5` for the `Database:` line |
@@ -349,15 +367,14 @@ DB_HOST=127.0.0.1 DB_PASSWORD='ChangeMe123!' node server.js
 
 # Frontend (new terminal): Vite dev server with hot reload
 cd frontend && npm install
-echo "VITE_API_URL=http://localhost:5000" > .env
-npm run dev
+npm run dev                # proxies /api to localhost:5000 (see vite.config.js)
 # open http://localhost:5173
 ```
 
 ## Going further (later lessons)
 
 - Add **HTTPS** with a domain name and Let's Encrypt (`certbot --nginx`).
-- Move the backend into a **private subnet** behind an **ALB**, and have Nginx proxy `/api` so the backend needs no public IP.
+- Move the backend into a **private subnet** behind an **ALB**, and point Nginx's `proxy_pass` at the ALB.
 - Replace the DB EC2 with **Amazon RDS**.
 - Store `DB_PASSWORD` in **SSM Parameter Store / Secrets Manager**.
 - Automate all of this with **user data**, **Ansible**, or **Terraform**.

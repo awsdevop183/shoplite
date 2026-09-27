@@ -40,7 +40,7 @@ function TierStatus({ onRecheck }) {
         <div className="tier">
           <h2>2 · Backend</h2>
           <Badge up={reachable} />
-          <p>API: <code>{API_URL}</code></p>
+          <p>API: <code>{API_URL || window.location.host + '/api → Nginx proxy'}</code></p>
           <p>Host: <code>{reachable === false ? 'unreachable' : health?.backend.hostname || '-'}</code></p>
         </div>
         <div className="arrow">→</div>
