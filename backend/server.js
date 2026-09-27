@@ -92,7 +92,7 @@ app.put('/api/products/:id', async (req, res) => {
       'UPDATE products SET name = ?, price = ?, stock = ? WHERE id = ?',
       [String(name).slice(0, 100), Number(price), Number(stock) || 0, req.params.id]
     );
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Product not found. It may have been deleted.' });
     res.json({ id: Number(req.params.id), name, price: Number(price), stock: Number(stock) || 0 });
   } catch (err) {
     console.error(err);
@@ -103,12 +103,17 @@ app.put('/api/products/:id', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const [result] = await db.query('DELETE FROM products WHERE id = ?', [req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Product not found. It may have been deleted.' });
     res.json({ deleted: Number(req.params.id) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Database error: ' + (err.code || err.message) });
   }
+});
+
+// Any other URL: JSON 404 instead of Express's default HTML "Cannot GET" page
+app.use((req, res) => {
+  res.status(404).json({ error: `Not found: ${req.method} ${req.path}` });
 });
 
 // 0.0.0.0 = listen on all network interfaces, so it is reachable via the EC2 public IP

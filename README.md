@@ -75,6 +75,7 @@ shoplite/
 │   └── shoplite-backend.service    # systemd unit
 └── frontend/                       # React app (Vite)
     ├── index.html
+    ├── public/404.html             # "Page not found" page Nginx shows for unknown URLs
     ├── src/
     │   ├── main.jsx                # React entry point
     │   ├── App.jsx                 # dashboard: stats, search, table, add/edit/delete dialogs
@@ -82,7 +83,7 @@ shoplite/
     │   └── style.css
     ├── package.json
     ├── vite.config.js
-    └── nginx/shoplite.conf         # Nginx site config + /api reverse proxy
+    └── nginx/shoplite.conf         # Nginx site config, /api reverse proxy, 404 page
 ```
 
 ### API endpoints
@@ -320,6 +321,9 @@ sudo mysql -e "SELECT * FROM shoplite.products;"
 | DB is private | From your laptop: `mysql -h DB_PUBLIC_IP ...` | Times out, since only `sg-backend` is allowed |
 | Logs | `journalctl -u shoplite-backend -f` while clicking | Every API request is logged |
 | Nginx logs | `sudo tail -f /var/log/nginx/shoplite.access.log` | Every page, asset and `/api` request |
+| 404 from Nginx | Open `http://FRONTEND_PUBLIC_IP/does-not-exist`, or `curl -i` it | "Page not found" page with status **404** (see DevTools → Network, and the access log) |
+| 404 from the backend | `curl -i http://FRONTEND_PUBLIC_IP/api/nope` | JSON `{"error":"Not found: GET /api/nope"}` with status **404**, passed through Nginx |
+| 404 for a missing product | Open Edit on a product, delete it with `curl -X DELETE .../api/products/ID`, then Save | Form shows "Product not found. It may have been deleted." and the list refreshes |
 
 ---
 

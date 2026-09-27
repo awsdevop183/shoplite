@@ -163,12 +163,17 @@ export default function App() {
   });
 
   const save = async (data) => {
-    if (editing.id) {
-      await updateProduct(editing.id, data);
-      notify(`"${data.name}" updated`);
-    } else {
-      await addProduct(data);
-      notify(`"${data.name}" added`);
+    try {
+      if (editing.id) {
+        await updateProduct(editing.id, data);
+        notify(`"${data.name}" updated`);
+      } else {
+        await addProduct(data);
+        notify(`"${data.name}" added`);
+      }
+    } catch (err) {
+      load(); // e.g. 404: someone else deleted it, so refresh the list
+      throw err; // the form shows the message
     }
     setEditing(null);
     load();
@@ -181,6 +186,7 @@ export default function App() {
       load();
     } catch (err) {
       notify('Could not delete: ' + err.message, 'danger');
+      load();
     }
     setDeleting(null);
   };
