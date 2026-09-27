@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShopLite – 3-Tier Demo</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>🛒 ShopLite</h1>
+    <p>A simple 3-tier app: Frontend → Backend → Database, each on its own EC2 instance</p>
+  </header>
+
+  <main>
+    <section class="tiers">
+      <div class="tier" id="tier-frontend">
+        <h2>1 · Frontend</h2>
+        <span class="badge up">UP</span>
+        <p>Host: <code id="fe-host">-</code></p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="tier" id="tier-backend">
+        <h2>2 · Backend</h2>
+        <span class="badge" id="be-status">…</span>
+        <p>API: <code id="be-url">-</code></p>
+        <p>Host: <code id="be-host">-</code></p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="tier" id="tier-db">
+        <h2>3 · Database</h2>
+        <span class="badge" id="db-status">…</span>
+        <p>Host: <code id="db-host">-</code></p>
+        <p>Version: <code id="db-version">-</code></p>
+      </div>
+    </section>
+    <button id="refresh-health" class="secondary">↻ Re-check connections</button>
+
+    <section class="card">
+      <h2>Add a product</h2>
+      <form id="add-form">
+        <input name="name" placeholder="Product name" required maxlength="100" />
+        <input name="price" type="number" step="0.01" min="0" placeholder="Price" required />
+        <input name="stock" type="number" min="0" placeholder="Stock" />
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Products <small>(rows read from MySQL through the API)</small></h2>
+      <p id="message" class="message"></p>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th></th></tr>
+        </thead>
+        <tbody id="products"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+[Unit]
+Description=ShopLite Backend API (Node.js)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/shoplite-backend
+EnvironmentFile=/opt/shoplite-backend/.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

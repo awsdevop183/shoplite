@@ -1,0 +1,15 @@
+[Unit]
+Description=ShopLite Frontend (Node.js static server)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/shoplite-frontend
+EnvironmentFile=/opt/shoplite-frontend/.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+{
+  "name": "shoplite-frontend",
+  "version": "1.0.0",
+  "description": "ShopLite web UI (tier 1 of the 3-tier DevOps demo). No dependencies.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
