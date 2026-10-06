@@ -374,11 +374,3 @@ cd frontend && npm install
 npm run dev                # proxies /api to localhost:5000 (see vite.config.js)
 # open http://localhost:5173
 ```
-
-## Going further (later lessons)
-
-- Add **HTTPS** with a domain name and Let's Encrypt (`certbot --nginx`).
-- Move the backend into a **private subnet** behind an **ALB**, and point Nginx's `proxy_pass` at the ALB.
-- Replace the DB EC2 with **Amazon RDS**.
-- Store `DB_PASSWORD` in **SSM Parameter Store / Secrets Manager**.
-- Automate all of this with **user data**, **Ansible**, or **Terraform**.
